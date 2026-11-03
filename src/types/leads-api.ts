@@ -201,7 +201,8 @@ export interface ApiLeadCall {
   caller: number | string | null;
   caller_name?: string;
   phone_number: string | null;
-  duration_seconds: number | null;
+  // duration_seconds: number | null;
+  duration_input?: string | null;
   outcome: string | null;
   notes: string | null;
   recording_url: string | null;
