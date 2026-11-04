@@ -384,7 +384,8 @@ export default function CallsPage() {
           </SelectContent>
         </Select>
 
-        {can && (
+
+        {(can as (permission: string) => boolean)("view_branches") && (
           <Select
             value={branchId}
             onValueChange={(val) => updateUrlParams({ branch_id: val })}
