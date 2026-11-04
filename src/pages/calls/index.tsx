@@ -4,6 +4,10 @@ import {
   ArrowUpDown,
   ArrowDown,
   ArrowUp,
+  Download,
+  RotateCcw,
+  Loader2,
+  PhoneCall,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -18,11 +22,12 @@ import {
 } from "@/components/ui/select";
 import { useRole } from "@/context/role";
 import { useCalls, useCallSummary } from "@/hooks/use-calls";
+import { useBranches } from "@/hooks/use-branches";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { MiniBars, HBarList } from "@/components/charts";
 import { CallDetailSheet } from "./components/call-detail-sheet";
+import { callsService } from "@/services/calls.service";
 import type { CallItem } from "@/types/calls";
-import { useBranches } from "@/hooks/use-branches";
 
 export default function CallsPage() {
   const { can } = useRole();
@@ -41,8 +46,31 @@ export default function CallsPage() {
 
   const [debouncedSearch, setSearchInput] = useDebouncedValue(search, 300);
   const [selectedCall, setSelectedCall] = useState<CallItem | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
-  // Filter param generator
+  // Helper for date range parameters (NPT day boundaries)
+  const getDateRangeBounds = (preset: string) => {
+    if (!preset || preset === "all_time") return {};
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    let start: Date;
+
+    if (preset === "today") {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    } else if (preset === "last_7_days") {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0);
+    } else if (preset === "this_month") {
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    } else {
+      return {};
+    }
+
+    return {
+      call_timestamp__gte: start.toISOString(),
+      call_timestamp__lte: end,
+    };
+  };
+
   const updateUrlParams = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(searchParams);
     Object.entries(updates).forEach(([key, val]) => {
@@ -61,6 +89,11 @@ export default function CallsPage() {
     updateUrlParams({ search: val || null });
   };
 
+  const handleClearFilters = () => {
+    setSearchInput("");
+    setSearchParams({});
+  };
+
   const handleSort = (column: string) => {
     let nextOrdering = column;
     if (ordering === column) {
@@ -73,7 +106,6 @@ export default function CallsPage() {
     setSearchParams(next);
   };
 
-  // API parameters object
   const filterParams = useMemo(
     () => ({
       page,
@@ -84,28 +116,48 @@ export default function CallsPage() {
       outcome: outcome !== "all" ? outcome : undefined,
       branch_id: branchId !== "all" ? branchId : undefined,
       ordering,
+      ...getDateRangeBounds(dateRange),
     }),
-    [page, debouncedSearch, direction, caller, outcome, branchId, ordering],
+    [page, debouncedSearch, direction, caller, outcome, branchId, ordering, dateRange]
   );
 
-  const {
-    data: callData,
-    isLoading,
-    isError,
-    refetch,
-  } = useCalls(filterParams);
+  const exportFilterParams = useMemo(
+    () => ({
+      search: debouncedSearch || undefined,
+      direction: direction !== "all" ? direction : undefined,
+      created_by: caller !== "all" ? caller : undefined,
+      outcome: outcome !== "all" ? outcome : undefined,
+      branch_id: branchId !== "all" ? branchId : undefined,
+      ordering,
+      ...getDateRangeBounds(dateRange),
+    }),
+    [debouncedSearch, direction, caller, outcome, branchId, ordering, dateRange]
+  );
+
+  const { data: callData, isLoading, isError, refetch } = useCalls(filterParams);
   const { data: summary, isLoading: isSummaryLoading } = useCallSummary({
     search: debouncedSearch,
     direction: direction !== "all" ? direction : undefined,
     created_by: caller !== "all" ? caller : undefined,
     branch_id: branchId !== "all" ? branchId : undefined,
+    ...getDateRangeBounds(dateRange),
   });
+
+  const handleExportCsv = async () => {
+    try {
+      setIsExporting(true);
+      await callsService.exportCsv(exportFilterParams);
+    } catch (err) {
+      console.error("Export failed", err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
       {/* ---------------- 1. Top Cards Section (US-1) ---------------- */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Total Calls Card */}
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <p className="font-headline text-3xl font-bold">
             {isSummaryLoading ? "—" : (summary?.total_calls ?? 0)}
@@ -117,7 +169,6 @@ export default function CallsPage() {
           </p>
         </div>
 
-        {/* Talk Time Card */}
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <p className="font-headline text-3xl font-bold">
             {isSummaryLoading ? "—" : (summary?.total_formatted ?? "0m 0s")}
@@ -129,19 +180,15 @@ export default function CallsPage() {
           </p>
         </div>
 
-        {/* Avg Duration Card */}
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <p className="font-headline text-3xl font-bold">
             {isSummaryLoading
               ? "—"
-              : `${Math.floor((summary?.avg_seconds || 0) / 60)}m ${(summary?.avg_seconds || 0) % 60}s`}
+              : `${Math.floor((summary?.avg_seconds || 0) / 60)}m ${Math.round((summary?.avg_seconds || 0) % 60)}s`}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            per completed call
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">per completed call</p>
         </div>
 
-        {/* Connect Rate Card */}
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <p className="font-headline text-3xl font-bold text-emerald-600 dark:text-emerald-400">
             {isSummaryLoading
@@ -158,14 +205,11 @@ export default function CallsPage() {
 
       {/* ---------------- 2. Charts Section (US-1) ---------------- */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Calls per Day Chart */}
         <div className="rounded-xl border bg-card p-5 shadow-sm flex flex-col justify-between">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-semibold text-base">Calls per Day</h3>
-              <p className="text-xs text-muted-foreground">
-                Counted in Nepal Time (NPT)
-              </p>
+              <p className="text-xs text-muted-foreground">Counted in Nepal Time (NPT)</p>
             </div>
             <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
               {summary?.by_day?.length ?? 0} days
@@ -187,14 +231,11 @@ export default function CallsPage() {
           )}
         </div>
 
-        {/* Top 10 Callers List */}
         <div className="rounded-xl border bg-card p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-semibold text-base">Top 10 Callers</h3>
-              <p className="text-xs text-muted-foreground">
-                Ranked by number of completed calls
-              </p>
+              <p className="text-xs text-muted-foreground">Ranked by number of completed calls</p>
             </div>
             <span className="rounded-full border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
               Top callers
@@ -218,9 +259,8 @@ export default function CallsPage() {
         </div>
       </div>
 
-      {/* ---------------- 3. Filter Toolbar (US-2) ---------------- */}
+      {/* ---------------- 3. Filter Toolbar (US-2 & US-4) ---------------- */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Search */}
         <div className="relative min-w-[16rem] flex-1">
           <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
           <Input
@@ -231,11 +271,7 @@ export default function CallsPage() {
           />
         </div>
 
-        {/* Direction Filter */}
-        <Select
-          value={direction}
-          onValueChange={(val) => updateUrlParams({ direction: val })}
-        >
+        <Select value={direction} onValueChange={(val) => updateUrlParams({ direction: val })}>
           <SelectTrigger className="w-36 rounded-lg">
             <SelectValue placeholder="All directions" />
           </SelectTrigger>
@@ -246,11 +282,7 @@ export default function CallsPage() {
           </SelectContent>
         </Select>
 
-        {/* Caller Picker */}
-        <Select
-          value={caller}
-          onValueChange={(val) => updateUrlParams({ caller: val })}
-        >
+        <Select value={caller} onValueChange={(val) => updateUrlParams({ caller: val })}>
           <SelectTrigger className="w-36 rounded-lg">
             <SelectValue placeholder="All callers" />
           </SelectTrigger>
@@ -259,11 +291,7 @@ export default function CallsPage() {
           </SelectContent>
         </Select>
 
-        {/* Outcome Filter */}
-        <Select
-          value={outcome}
-          onValueChange={(val) => updateUrlParams({ outcome: val })}
-        >
+        <Select value={outcome} onValueChange={(val) => updateUrlParams({ outcome: val })}>
           <SelectTrigger className="w-36 rounded-lg">
             <SelectValue placeholder="All outcomes" />
           </SelectTrigger>
@@ -276,11 +304,7 @@ export default function CallsPage() {
           </SelectContent>
         </Select>
 
-        {/* Time Range Preset */}
-        <Select
-          value={dateRange}
-          onValueChange={(val) => updateUrlParams({ date_range: val })}
-        >
+        <Select value={dateRange} onValueChange={(val) => updateUrlParams({ date_range: val })}>
           <SelectTrigger className="w-36 rounded-lg">
             <CalendarIcon className="mr-2 size-4 text-muted-foreground" />
             <SelectValue placeholder="All time" />
@@ -293,13 +317,8 @@ export default function CallsPage() {
           </SelectContent>
         </Select>
 
-        {/* Branch Filter (Staff Users) */}
-
         {can && (
-          <Select
-            value={branchId}
-            onValueChange={(val) => updateUrlParams({ branch_id: val })}
-          >
+          <Select value={branchId} onValueChange={(val) => updateUrlParams({ branch_id: val })}>
             <SelectTrigger className="w-36 rounded-lg">
               <SelectValue placeholder="All branches" />
             </SelectTrigger>
@@ -310,17 +329,44 @@ export default function CallsPage() {
                   Loading branches...
                 </SelectItem>
               ) : (
-                branchesData?.results?.map(
-                  (b: { id: number; name: string }) => (
-                    <SelectItem key={b.id} value={b.id.toString()}>
-                      {b.name}
-                    </SelectItem>
-                  ),
-                )
+                branchesData?.results?.map((b: { id: number; name: string }) => (
+                  <SelectItem key={b.id} value={b.id.toString()}>
+                    {b.name}
+                  </SelectItem>
+                ))
               )}
             </SelectContent>
           </Select>
         )}
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleClearFilters}
+          className="h-9 rounded-lg text-xs gap-1"
+        >
+          <RotateCcw className="size-3.5" /> Clear filters
+        </Button>
+
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleExportCsv}
+          disabled={isExporting}
+          className="h-9 rounded-lg text-xs gap-1 ml-auto"
+        >
+          {isExporting ? (
+            <>
+              <Loader2 className="size-3.5 animate-spin" />
+              <span>Exporting...</span>
+            </>
+          ) : (
+            <>
+              <Download className="size-3.5" />
+              <span>Export CSV</span>
+            </>
+          )}
+        </Button>
       </div>
 
       {/* ---------------- 4. Call Table (US-2 & US-3) ---------------- */}
@@ -374,10 +420,7 @@ export default function CallsPage() {
             <tbody className="divide-y text-sm">
               {isLoading ? (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="p-8 text-center text-muted-foreground"
-                  >
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
                     Loading call log...
                   </td>
                 </tr>
@@ -385,22 +428,22 @@ export default function CallsPage() {
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-destructive">
                     Failed to fetch calls.{" "}
-                    <Button
-                      variant="link"
-                      onClick={() => refetch()}
-                      className="p-0 h-auto"
-                    >
+                    <Button variant="link" onClick={() => refetch()} className="p-0 h-auto">
                       Retry
                     </Button>
                   </td>
                 </tr>
               ) : callData?.results?.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="p-8 text-center text-muted-foreground"
-                  >
-                    No calls match these filters.
+                  <td colSpan={8} className="p-12 text-center text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center space-y-1">
+                      <PhoneCall className="size-6 text-muted-foreground/60 mb-1" />
+                      <span className="text-sm font-medium">
+                        {search || direction !== "all" || outcome !== "all" || dateRange !== "all_time" || branchId !== "all"
+                          ? "No calls match these filters"
+                          : "No calls yet"}
+                      </span>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -427,9 +470,7 @@ export default function CallsPage() {
                             : "bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
                         }`}
                       >
-                        {call.direction === "outbound"
-                          ? "↖ Outbound"
-                          : "↘ Inbound"}
+                        {call.direction === "outbound" ? "↖ Outbound" : "↘ Inbound"}
                       </span>
                     </td>
                     <td className="p-3">
@@ -440,15 +481,13 @@ export default function CallsPage() {
                         {call.lead_reference_number}
                       </span>
                     </td>
-                    <td className="p-3 font-mono text-xs">
-                      {call.phone_number}
-                    </td>
+                    <td className="p-3 font-mono text-xs">{call.phone_number}</td>
 
                     <td className="p-3">
                       {call.created_by_name ??
                         (call.created_by ? `User #${call.created_by}` : "—")}
                     </td>
-                    {/* <td className="p-3">{call.created_by_name ?? "—"}</td> */}
+
                     <td className="p-3 font-mono text-xs">
                       {call.duration_formatted ?? `${call.duration_seconds}s`}
                     </td>
@@ -480,7 +519,44 @@ export default function CallsPage() {
         </div>
       </div>
 
-      {/* ---------------- 5. US-3 Side Sheet Panel ---------------- */}
+      {/* ---------------- 5. Pagination Footer (US-2) ---------------- */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground pt-2">
+        <div>
+          Showing {callData?.count ? (page - 1) * 20 + 1 : 0}–
+          {Math.min(page * 20, callData?.count || 0)} of {callData?.count || 0}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set("page", (page - 1).toString());
+              setSearchParams(next);
+            }}
+            className="h-8 text-xs"
+          >
+            Previous
+          </Button>
+          <span className="px-2 font-mono">Page {page}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page * 20 >= (callData?.count || 0)}
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set("page", (page + 1).toString());
+              setSearchParams(next);
+            }}
+            className="h-8 text-xs"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+
+      {/* ---------------- 6. Side Sheet Panel (US-3) ---------------- */}
       <CallDetailSheet
         call={selectedCall}
         open={!!selectedCall}
