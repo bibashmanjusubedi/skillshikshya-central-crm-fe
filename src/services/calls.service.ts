@@ -17,7 +17,8 @@ export const callsService = {
    */
   exportCsv: async (params: Omit<CallFilterParams, "page" | "page_size">) => {
     // Exclude pagination parameters to export ALL matching rows across all pages
-    const { page, page_size, ...exportParams } = params as CallFilterParams;
+    const { page: _page, page_size: _page_size, ...exportParams } = params as CallFilterParams;
+
 
     const response = await api.get("/calls/export/", {
       params: exportParams,
