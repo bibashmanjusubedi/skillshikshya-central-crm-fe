@@ -22,9 +22,11 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { MiniBars, HBarList } from "@/components/charts";
 import { CallDetailSheet } from "./components/call-detail-sheet";
 import type { CallItem } from "@/types/calls";
+import { useBranches } from "@/hooks/use-branches";
 
 export default function CallsPage() {
   const { can } = useRole();
+  const { data: branchesData, isLoading: isBranchesLoading } = useBranches();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // URL state synchronization (US-2)
@@ -292,6 +294,7 @@ export default function CallsPage() {
         </Select>
 
         {/* Branch Filter (Staff Users) */}
+
         {can && (
           <Select
             value={branchId}
@@ -302,9 +305,19 @@ export default function CallsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All branches</SelectItem>
-              <SelectItem value="1">Kathmandu</SelectItem>
-              <SelectItem value="2">Bhaktapur</SelectItem>
-              <SelectItem value="3">Biratnagar</SelectItem>
+              {isBranchesLoading ? (
+                <SelectItem value="loading" disabled>
+                  Loading branches...
+                </SelectItem>
+              ) : (
+                branchesData?.results?.map(
+                  (b: { id: number; name: string }) => (
+                    <SelectItem key={b.id} value={b.id.toString()}>
+                      {b.name}
+                    </SelectItem>
+                  ),
+                )
+              )}
             </SelectContent>
           </Select>
         )}
