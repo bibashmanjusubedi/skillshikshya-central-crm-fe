@@ -9,6 +9,8 @@ import {
   Loader2,
   PhoneCall,
 } from "lucide-react";
+
+import { useNavigate } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -30,6 +32,7 @@ import { callsService } from "@/services/calls.service";
 import type { CallItem } from "@/types/calls";
 
 export default function CallsPage() {
+  const navigate = useNavigate();
   const { can } = useRole();
   const { data: branchesData, isLoading: isBranchesLoading } = useBranches();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -558,10 +561,15 @@ export default function CallsPage() {
                           : "↘ Inbound"}
                       </span>
                     </td>
-                    <td className="p-3">
-                      <span className="font-semibold text-brand hover:underline block">
+
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/leads/${call.lead}`)} // Adjust route if your lead detail route differs (e.g., /leads/${call.lead_id})
+                        className="font-semibold text-brand hover:underline block text-left"
+                      >
                         {call.lead_name}
-                      </span>
+                      </button>
                       <span className="text-xs text-muted-foreground font-mono">
                         {call.lead_reference_number}
                       </span>
@@ -583,13 +591,12 @@ export default function CallsPage() {
                         {call.outcome?.replace("_", " ")}
                       </span>
                     </td>
-                    <td className="p-3">
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
                       {call.recording_url ? (
                         <a
                           href={call.recording_url}
                           target="_blank"
                           rel="noreferrer"
-                          onClick={(e) => e.stopPropagation()}
                           className="text-xs text-brand underline font-medium"
                         >
                           Listen
